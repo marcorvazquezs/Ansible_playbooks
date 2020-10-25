@@ -1,0 +1,68 @@
+---
+- name: SSL/TLS CERT UPDATE
+  hosts: all 
+  become: yes
+  become_user: root
+
+  vars: 
+    paths: 
+      - /root/db/rds-combined-ca-bundle.pem 
+      - /root/rds-combined-ca-bundle.pem 
+      - /usr/share/ca-certificates/ca-certificates/rds-combined-ca-bundle.pem 
+      - /root/db/db_name.ca.pem
+
+  tasks: 
+    - name: Check if the certificate file exists 
+      stat: 
+       path: "{{ item }}"
+      with_items:
+       - "{{ paths }}"
+      register: output
+
+    - debug: 
+        msg: " The Certificate bundle exists "
+      with_items: "{{ output.results }}"
+      when: item.stat.exists
+    
+    - name: If file exists replace with updated bundle 
+      get_url:
+        url: https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem
+        dest: "{{ item.stat.path }}"
+        force: yes
+        mode: '0644'
+      with_items:
+        - "{{ output.results }}"
+      when: item.stat.exists == true
+      register: updated
+
+  #  - name: If file exist replace with updated bundle 
+  #    copy: 
+  #      src: ~/rds-combined-ca-bundle.pem
+  #      dest: '{{ item.item }}'
+  #      force: yes
+  #      mode: 0644
+  #    with_items: 
+  #      - '{{ output.results }}'
+  #    when: item.stat.exists == true
+  #    register: updated
+
+    #- name: Restart MySQL service 
+    #  service:
+    #     name: mysqld
+    #     state: restarted
+    #    enabled: yes
+    #  ignore_errors: no
+    #  when: updated.changed
+  
+    - name: Restart SQL services
+      systemd: 
+        name: '{{ item }}'
+        state: restarted 
+        enabled: yes
+      with_items:
+         # provide a list of SQL services to be restarted
+      ignore_errors: no 
+     # when: updated.changed
+
+
+  

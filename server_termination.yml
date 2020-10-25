@@ -1,0 +1,191 @@
+---
+- name: BACKUP 
+  hosts: localhost
+  become: no
+  gather_facts: no 
+  vars_prompt: 
+    - name: target_host 
+      prompt: "Please enter the FQDN of the server to be terminated: "
+      private: no 
+
+  tasks: 
+    - add_host: 
+        name: "{{ target_host }}"
+        groups: terminated_server_fqdn 
+
+    - name: Register server FQDN and IP as variables 
+      set_fact: 
+        terminated_server_fqdn: "{{ target_host }}"
+        terminated_server_ip: "{{ lookup('dig', '{{ target_host}}.') }}"
+
+- hosts: terminated_server_fqdn  
+  become: true 
+  become_method: sudo    
+
+  tasks: 
+    - name: Register server short hostname for backup check 
+      set_fact: 
+        terminated_server_short: "{{ inventory_hostname_short }}"
+        server_groups: "{{ group_names }}"
+
+
+    - name: Run backup script on server to be terminated 
+      script: ../configs/termination/backup.sh
+      register: output
+
+    - name: Check Server Backup folder exists 
+      stat: 
+        path: ~/Documents/Server Backups/
+      register: folder_backup_storage
+      delegate_to: localhost
+      become: false
+
+    - fail: 
+       msg: "The Server Backups folder does not exist."
+      when: folder_backup_storage.stat.exists == false 
+
+  #  - debug: 
+  #      msg: "It is a directory"
+  #    when: folder_backup_storage.stat.exists and folder_backup_storage.stat.isdir
+  #  - debug: 
+  #      msg: "Server being terminated is {{ terminated_server_fqdn }}"
+  #  - debug: 
+  #      msg: "Server being terminated has the ip address: {{ terminated_server_ip }}"
+
+# This will fail if user does not have the Server Backup Tresor Folder. 
+# This can be optimized later to put this in another location like an S3 bucket. 
+    - name: Fetch backup file to local folder 
+      fetch: 
+        src: /home/{{ inventory_hostname }}-etc-home-cron-backup.tar.gz 
+        dest: ~/Documents/Server Backups/{{inventory_hostname_short}}-etc-home-cron-backup.tar.gz 
+        flat: yes
+      become: no
+      when: folder_backup_storage.stat.exists and folder_backup_storage.stat.isdir
+
+    - name: Check the backup file was successfully saved 
+      stat: 
+        path: ~/Documents/Server Backups/{{ inventory_hostname_short }}-etc-home-cron-backup.tar.gz
+      register: backup_result
+      delegate_to: localhost 
+      become: no
+
+    - fail: 
+       msg: "The backup file was not successfully saved."
+      when: backup_result.stat.exists == false 
+
+    - name: Cleanup backup file in server to be terminated 
+      file:
+        path: /home/{{ inventory_hostname_short }}-etc-home-cron-backup.tar.gz
+        state: absent 
+    
+
+################################################################################################     
+################################################################################################
+# Remove IP from firewall rules (iptables, ufw)
+- name: FIREWALL-CLEANUP 
+  hosts: all 
+  become: yes 
+  become_method: sudo 
+      
+  tasks: 
+    - name: Check ufw status is enabled 
+      shell: ufw status 
+      changed_when: false 
+      register: ufw_check 
+
+#    - debug: 
+#        mgs: "{{ ufw_check }}"
+
+    - name: Search for terminated server IP address in ufw rules 
+      shell: ufw status numbered | grep {{ hostvars['localhost']['terminated_server_ip'] }}
+      register: ufw_output
+      when: "'inactive' not in ufw_check.stdout"
+
+# Checks for matching rules
+#    - debug: 
+#        var: ufw_output.stdout_lines
+#      when: ufw_output.stdout != ""
+
+    - name: Deny traffic from terminated server IP if matching ufw rule is found 
+      ufw: 
+        rule: allow 
+        delete: yes
+        src: "{{ hostvars['localhost']['terminated_server_ip'] }}"
+      when: ufw_output.stdout != "" and "'inactive' not in ufw_check.stdout"
+
+    - name: Output if UFW is not active 
+      fail:
+       msg: "UFW is not running on the server"
+      when: "'inactive' in ufw_check.stdout"
+
+# Add ability to scan all UFW files for terminated IP and remove the line in file. 
+#    - name: grab UFW file names 
+#      shell: ls /etc/ufw/*.rules 
+#      register: ufw_files 
+
+#    - name: delete terminated IP from UFW files 
+#      lineinfile: 
+#         path: /etc/ufw/"{{ item }}"
+#         state: absent
+#         create: no
+#         backup: no 
+#         line: 
+
+
+# Just in case iptables is required
+    - name: Search for terminated server IP address in iptables rules 
+      shell: iptables -S | grep {{ hostvars['localhost']['terminated_server_ip'] }}
+      register: iptables_output
+      when: "'inactive' in ufw_check.stdout"
+    
+# Checks for matching rules 
+#    - debug: 
+#        var: iptables_output.stdout_lines 
+#      when: iptables_output.stdout != ""
+
+    - name: Deny traffic from terminated server IP if matching iptables rule is found 
+      iptables: 
+        chain: INPUT
+        source: "{{ hostvars['localhost']['terminated_server_ip'] }}"
+        jump: ACCEPT 
+        state: absent  
+      when: iptables_output.stdout is defined and iptables_output.stdout != "" and "'inactive' in ufw_check.stdout"
+    
+    - name: Save iptables rules 
+      shell: netfilter-persistent save 
+      when: iptables_output.stdout is defined and iptables_output.stdout != "" and "'inactive' in ufw_check.stdout"
+
+################################################################################################     
+################################################################################################
+# Remove reference to server in db 
+- name: DB CLEANUP 
+  hosts: localhost 
+  become: no 
+  vars: 
+    mysql_testdb_username: 
+    mysql_testdb_password: 
+    mysql_proddb_username:
+    mysql_proddb_password: 
+
+  tasks: 
+    - name: Download aurora public key 
+      get_url: 
+        url: https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem
+        dest: /etc/ssl/certs/rds-combined-ca-bundle.pem 
+        mode: 0600 
+
+#    - debug: 
+#        msg: "{{ hostvars['localhost']['terminated_server_fqdn'] }}"
+
+    - name: CLEANUP DB PROD  
+      command: > 
+        mysql -u {{ mysql_proddb_username }} -p{{ mysql_proddb_password }} -h prod_db_host_name  -D db_name --ssl-ca=/etc/ssl/certs/rds-combined-ca-bundle.pem --ssl-mode=VERIFY_CA --execute="DELETE FROM db.table WHERE host='{{ hostvars['localhost']['terminated_server_fqdn'] }}'"
+      when: "'test' not in hostvars[groups['terminated_server_fqdn'][0]]['server_groups']"
+    
+    - name: CLEANUP TEST DB
+      command: > 
+        mysql -u {{ mysql_testdb_username }} -p{{ mysql_testdb_password }} -h test_db_hostname  -D db_name --ssl-ca=/etc/ssl/certs/rds-combined-ca-bundle.pem --ssl-mode=VERIFY_CA --execute="DELETE FROM db.table WHERE host='{{ hostvars['localhost']['terminated_server_fqdn'] }}'"
+      when: "'test' in hostvars[groups['terminated_server_fqdn'][0]]['server_groups']"
+
+       
+

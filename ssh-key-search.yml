@@ -1,0 +1,46 @@
+---
+- hosts: all
+  tasks:
+  - name: Create /etc/marco dir
+    file:
+      path: /etc/marco
+      state: directory
+      owner: root
+    become: yes
+    become_method: sudo
+
+  - name: Copy ssh key search script
+    copy:
+      src: ./configs/ssh-key-search/ssh-key-search.sh
+      dest: /etc/rubica/ssh-key-search.sh
+      backup: no
+      mode: 0755 
+    become: yes
+    become_method: sudo
+
+  - name: Copy ssh config cat script
+    copy:
+      src: ./configs/ssh-key-search/ssh-config-search.sh
+      dest: /etc/marco/ssh-config-search.sh
+      backup: no
+      mode: 0755 
+    become: yes
+    become_method: sudo
+
+  - name: Give user conductor perms to run the search script as sudo
+    lineinfile:
+      path: /etc/sudoers
+      state: present
+      line: 'conductor  ALL=(root) NOPASSWD: /etc/marco/ssh-key-search.sh'
+      validate: '/usr/sbin/visudo -cf %s'
+    become: yes
+    become_method: sudo
+
+  - name: Give user perms to run the cat script as sudo
+    lineinfile:
+      path: /etc/sudoers
+      state: present
+      line: 'conductor  ALL=(root) NOPASSWD: /etc/rubica/ssh-config-search.sh'
+      validate: '/usr/sbin/visudo -cf %s'
+    become: yes
+    become_method: sudo

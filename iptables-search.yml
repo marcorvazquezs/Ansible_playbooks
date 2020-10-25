@@ -1,0 +1,33 @@
+---
+- name: search ip tables rules 
+  hosts: all 
+  serial: 1
+  become: yes 
+  become_method: sudo 
+
+  tasks: 
+    - name: create file in local host 
+      file: 
+        path: ~/Desktop/firewall-results.txt
+        state: touch 
+      delegate_to: localhost 
+      become: false
+      run_once: true 
+
+    - name: Run firewall search script on server
+      script: /path/to/script 
+      register: output 
+      ignore_errors: yes 
+
+###################################################################################
+
+    - name: Append script results to file 
+      lineinfile: 
+        dest: ~/Desktop/firewall-results.txt
+        state: present 
+        line: "{{ output.stdout }}"
+        insertafter: EOF 
+      delegate_to: localhost 
+      become: false 
+
+      
