@@ -1,0 +1,30 @@
+---
+- name: ssl-cert-search
+  hosts: all
+  # serial: 1 
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: Create file in localhost 
+      file: 
+        path: ~/Desktop/ssl-cert-locations.txt
+        state: touch
+      delegate_to: localhost 
+      become: false 
+      run_once: true 
+
+
+    - name: Run ssh search script on server
+      script: ../configs/ssh-key-search/ssl-cert-search.sh
+      register: output
+      ignore_errors: yes 
+
+################################################################################
+    - name: Append script results to file
+      lineinfile:
+        dest: ~/Desktop/ssl-cert-locations.txt
+        state: present
+        line: "{{ output.stdout }}"
+      delegate_to: localhost
+      become: false

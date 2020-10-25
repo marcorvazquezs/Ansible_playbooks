@@ -1,0 +1,42 @@
+---
+- name: ssh-key-list
+  hosts: all
+  # serial: 1 
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: Create file in localhost 
+      file: 
+        path: ~/Desktop/ssh-keys.txt
+        state: touch
+      delegate_to: localhost 
+      become: false 
+      run_once: true 
+
+    # commented these tasks out since they are handled by the script instead.   
+    #- name: Get server host name
+      #shell: echo "{{ inventory_hostname }}"
+      #register: hostname
+
+    #- name: copy hostname to file 
+     # lineinfile: 
+     #   dest: ~/Desktop/ssh-keys.txt
+     #   state: present 
+     #   line: "{{ hostname.stdout }}"
+     # delegate_to: localhost
+     # become: false
+
+    - name: Run ssh search script on server
+      script: ../configs/ssh-key-search/ssh-key-search.sh
+      register: output
+      ignore_errors: yes 
+
+################################################################################
+    - name: Append script results to file
+      lineinfile:
+        dest: ~/Desktop/ssh-keys.txt
+        state: present
+        line: "{{ output.stdout }}"
+      delegate_to: localhost
+      become: false

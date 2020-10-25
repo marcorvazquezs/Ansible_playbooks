@@ -1,0 +1,36 @@
+---
+- name: REMOVE OLD USERS & SSH KEYS
+  hosts: all 
+  become: yes 
+  become_method: sudo 
+
+  vars: 
+    users: 
+      - list 
+      - of 
+      - users
+
+    keys:
+      - list 
+      - of 
+      - ssh 
+      - keys
+
+  tasks: 
+    - name: Remove auth keys from users home directories 
+      authorized_key: 
+        user: "{{ item[0] }}"
+        state: absent 
+        key: "{{ item[1] }}"
+      ignore_errors: yes 
+      with_nested: 
+        - "{{ users }}"
+        - "{{ keys }}"
+
+    - name: remove 'user'
+      user: 
+        name: '{{ item }}'
+        state: absent 
+        remove: yes 
+      with_items: 
+        - '{{ users }}'
